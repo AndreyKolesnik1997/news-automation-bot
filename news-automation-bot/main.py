@@ -3,21 +3,20 @@ import requests
 import sqlite3
 import time
 import re
+import os
 from html import unescape
 
 
 # ============================================================
-# НАСТРОЙКИ
+# CONFIGURATION
 # ============================================================
-
-import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = "@holovni_novyny_ua"
 
 SOURCES = {
-    "Українська правда": "https://www.pravda.com.ua/rss/",
-    "РБК-Україна": "https://www.rbc.ua/static/rss/all.ukr.rss.xml",
+    "Ukrainska Pravda": "https://www.pravda.com.ua/rss/",
+    "RBC-Ukraine": "https://www.rbc.ua/static/rss/all.ukr.rss.xml",
     "NV": "https://nv.ua/ukr/rss/all.xml"
 }
 
@@ -27,7 +26,7 @@ MAX_NEWS_PER_SOURCE = 10
 
 
 # ============================================================
-# КЛЮЧЕВЫЕ СЛОВА ДЛЯ ФИЛЬТРА
+# KEYWORDS FOR NEWS CLASSIFICATION
 # ============================================================
 
 STRONG_KEYWORDS = [
@@ -98,7 +97,7 @@ EXCLUDED_PHRASES = [
 
 
 # ============================================================
-# ОЧИСТКА ТЕКСТА
+# TEXT CLEANING
 # ============================================================
 
 def clean_text(text):
@@ -113,7 +112,7 @@ def clean_text(text):
 
 
 # ============================================================
-# ФИЛЬТР НОВОСТЕЙ
+# NEWS CLASSIFICATION
 # ============================================================
 
 def classify_news(title, description):
@@ -122,18 +121,18 @@ def classify_news(title, description):
     score = 0
     matched_keywords = []
 
-    # Сильные слова = 3 балла
+    # Strong keywords = 3 points
     for keyword in STRONG_KEYWORDS:
         if keyword.lower() in text:
             score += 3
             matched_keywords.append(f"{keyword} (+3)")
 
-    # Средние слова = 2 балла
+    # Medium keywords = 2 points
     for keyword in MEDIUM_KEYWORDS:
 
         keyword_lower = keyword.lower()
 
-        # Не считаем погодный фронт
+        # Ignore weather-related uses of "front"
         if keyword_lower == "фронт":
             if any(excluded in text for excluded in EXCLUDED_PHRASES):
                 continue
@@ -142,21 +141,21 @@ def classify_news(title, description):
             score += 2
             matched_keywords.append(f"{keyword} (+2)")
 
-    # Слабые слова = 1 балл
+    # Weak keywords = 1 point
     for keyword in WEAK_KEYWORDS:
         if keyword.lower() in text:
             score += 1
             matched_keywords.append(f"{keyword} (+1)")
 
-    # 3 балла и больше = важная новость
+    # 3 or more points = important news
     if score >= 3:
-        return "🔴 ВАЖНО", matched_keywords
+        return "🔴 IMPORTANT", matched_keywords
 
-    return "🟡 ОБЫЧНАЯ", matched_keywords
+    return "🟡 REGULAR", matched_keywords
 
 
 # ============================================================
-# HTML ДЛЯ TELEGRAM
+# TELEGRAM HTML
 # ============================================================
 
 def escape_html(text):
@@ -181,7 +180,7 @@ def make_post(title, description):
 
 
 # ============================================================
-# РАБОТА С БАЗОЙ ДАННЫХ
+# DATABASE
 # ============================================================
 
 def create_database():
@@ -230,7 +229,7 @@ def save_news(link, title):
 
 
 # ============================================================
-# ПОИСК ФОТО
+# IMAGE EXTRACTION
 # ============================================================
 
 def get_image(news):
@@ -277,7 +276,7 @@ def get_image(news):
 
 
 # ============================================================
-# ОТПРАВКА В TELEGRAM
+# TELEGRAM DELIVERY
 # ============================================================
 
 def send_to_telegram(message, image_url=None):
@@ -313,21 +312,21 @@ def send_to_telegram(message, image_url=None):
 
         if response.status_code == 200:
 
-            print("✅ Опубликовано")
+            print("✅ Published successfully")
 
             return True
 
         elif response.status_code == 429:
 
-            print("⚠️ Telegram временно ограничил отправку")
+            print("⚠️ Telegram rate limit reached")
 
             try:
                 retry_after = response.json()["parameters"]["retry_after"]
 
-            except:
+            except Exception:
                 retry_after = 60
 
-            print(f"⏳ Ждём {retry_after} секунд...")
+            print(f"⏳ Waiting {retry_after} seconds...")
 
             time.sleep(retry_after)
 
@@ -335,26 +334,26 @@ def send_to_telegram(message, image_url=None):
 
         else:
 
-            print("❌ Ошибка Telegram:")
+            print("❌ Telegram API error:")
             print(response.text)
 
             return False
 
     except Exception as error:
 
-        print("❌ Ошибка соединения:")
+        print("❌ Connection error:")
         print(error)
 
         return False
 
 
 # ============================================================
-# ПЕРВЫЙ ЗАПУСК
+# INITIALIZE EXISTING NEWS
 # ============================================================
 
 def initialize_existing_news():
 
-    print("\n📚 Первый запуск: запоминаем существующие новости...")
+    print("\n📚 First run: storing existing news...")
 
     total = 0
 
@@ -368,14 +367,14 @@ def initialize_existing_news():
 
             if not feed.entries:
 
-                print("❌ Новости не найдены")
+                print("❌ No news found")
 
                 continue
 
             for news in feed.entries[:MAX_NEWS_PER_SOURCE]:
 
                 link = news.get("link", "")
-                title = news.get("title", "Без заголовка")
+                title = news.get("title", "Untitled")
 
                 if not link:
                     continue
@@ -386,28 +385,28 @@ def initialize_existing_news():
 
                     total += 1
 
-                    print("📌 Запомнено:", title)
+                    print("📌 Stored:", title)
 
         except Exception as error:
 
-            print("❌ Ошибка источника:")
+            print("❌ Source error:")
             print(error)
 
-    print(f"\n✅ Запомнено старых новостей: {total}")
-    print("ℹ️ Старые новости публиковаться не будут.")
+    print(f"\n✅ Stored existing news: {total}")
+    print("ℹ️ Existing news will not be published.")
 
 
 # ============================================================
-# ПРОВЕРКА НОВОСТЕЙ
+# NEWS CHECK
 # ============================================================
 
 def check_news():
 
-    print("\n🔎 Проверяем новости...")
+    print("\n🔎 Checking for new articles...")
 
     for source_name, rss_url in SOURCES.items():
 
-        print(f"\n📡 Источник: {source_name}")
+        print(f"\n📡 Source: {source_name}")
 
         try:
 
@@ -415,7 +414,7 @@ def check_news():
 
             if not feed.entries:
 
-                print("❌ Новости не найдены.")
+                print("❌ No news found.")
 
                 continue
 
@@ -425,7 +424,7 @@ def check_news():
 
                 title = news.get(
                     "title",
-                    "Без заголовка"
+                    "Untitled"
                 )
 
                 link = news.get(
@@ -444,14 +443,14 @@ def check_news():
                 if not link:
                     continue
 
-                # Уже была опубликована
+                # Skip already processed articles
                 if news_exists(link):
 
-                    print("⏭ Уже опубликовано:", title)
+                    print("⏭ Already processed:", title)
 
                     continue
 
-                # Определяем важность
+                # Classify the article
                 category, keywords = classify_news(
                     title,
                     description
@@ -462,31 +461,31 @@ def check_news():
                 if keywords:
 
                     print(
-                        "   🔑 Ключевые слова:",
+                        "   🔑 Keywords:",
                         ", ".join(keywords)
                     )
 
-                # Ищем фото
+                # Extract image
                 image_url = get_image(news)
 
                 if image_url:
 
-                    print("🖼 Фото найдено")
+                    print("🖼 Image found")
 
                 else:
 
-                    print("📷 Фото не найдено")
+                    print("📷 No image found")
 
-                # Создаём сообщение
+                # Create Telegram message
                 message = make_post(
                     title,
                     description
                 )
 
-                print("\n🆕 Новая новость:")
+                print("\n🆕 New article:")
                 print(title)
 
-                # Отправляем
+                # Send to Telegram
                 success = send_to_telegram(
                     message,
                     image_url
@@ -501,45 +500,45 @@ def check_news():
 
                     new_count += 1
 
-                    print("💾 Новость сохранена в базе")
+                    print("💾 Article saved to database")
 
                     time.sleep(POST_DELAY)
 
             if new_count == 0:
 
-                print("ℹ️ Новых новостей нет.")
+                print("ℹ️ No new articles.")
 
             else:
 
                 print(
-                    f"✅ Опубликовано новых: {new_count}"
+                    f"✅ New articles published: {new_count}"
                 )
 
         except Exception as error:
 
-            print("❌ Ошибка источника:")
+            print("❌ Source error:")
             print(error)
 
 
 # ============================================================
-# ЗАПУСК БОТА
+# APPLICATION
 # ============================================================
 
 def main():
 
-    print("🤖 Новинний бот запущено!")
+    print("🤖 News bot started!")
 
     print(
-        "📡 Источники: Українська правда, "
-        "РБК-Україна, NV"
+        "📡 Sources: Ukrainska Pravda, "
+        "RBC-Ukraine, NV"
     )
 
-    print("⏱ Проверка каждые 5 минут.")
+    print("⏱ Checking every 5 minutes.")
 
-    print("🧪 Фильтр работает в тестовом режиме.")
+    print("🧪 News classification is enabled.")
 
     print(
-        "ℹ️ Все новости пока продолжают публиковаться."
+        "ℹ️ All new articles are currently published."
     )
 
     create_database()
@@ -568,18 +567,18 @@ def main():
 
         except Exception as error:
 
-            print("❌ Общая ошибка:")
+            print("❌ General error:")
             print(error)
 
         print(
-            "\n⏳ Следующая проверка через 5 минут..."
+            "\n⏳ Next check in 5 minutes..."
         )
 
         time.sleep(CHECK_INTERVAL)
 
 
 # ============================================================
-# START
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
